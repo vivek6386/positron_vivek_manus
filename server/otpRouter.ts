@@ -13,6 +13,7 @@ import { sdk } from "./_core/sdk";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { otpRequestLimiter, otpVerifyLimiter, getRateLimitKey } from "./_core/rateLimiter";
+import { createOtpProof, consumeOtpProof } from "./_core/otpProofStore";
 
 /**
  * OTP Authentication Router
@@ -136,6 +137,8 @@ export const otpRouter = router({
         // Check if user exists
         const userInfo = await getUserByContact(contact);
 
+        const otpProofToken = createOtpProof(contact, contactType);
+
         if (userInfo) {
           // User exists, return user ID
           return {
@@ -144,16 +147,18 @@ export const otpRouter = router({
             userId: userInfo.userId,
             contact,
             contactType,
-          };
-        } else {
-          // New user, return contact info for registration
-          return {
-            success: true,
-            isNewUser: true,
-            contact,
-            contactType,
+            otpProofToken,
           };
         }
+
+        // New user, return contact info for registration
+        return {
+          success: true,
+          isNewUser: true,
+          contact,
+          contactType,
+          otpProofToken,
+        };
       } catch (error) {
         if (error instanceof TRPCError) {
           throw error;
@@ -174,12 +179,21 @@ export const otpRouter = router({
       z.object({
         contact: z.string().min(1),
         contactType: z.enum(["email", "phone"]),
+        otpProofToken: z.string().uuid("Valid OTP proof is required"),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { contact, contactType } = input;
+      const { contact, contactType, otpProofToken } = input;
 
       try {
+        const hasOtpProof = consumeOtpProof(otpProofToken, contact, contactType);
+        if (!hasOtpProof) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "OTP verification required before login",
+          });
+        }
+
         // Get user by contact
         const userInfo = await getUserByContact(contact);
 
@@ -187,6 +201,13 @@ export const otpRouter = router({
           throw new TRPCError({
             code: "NOT_FOUND",
             message: "User not found",
+          });
+        }
+
+        if (!userInfo.verified) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Contact is not verified",
           });
         }
 
@@ -247,12 +268,21 @@ export const otpRouter = router({
         contact: z.string().min(1),
         contactType: z.enum(["email", "phone"]),
         name: z.string().min(1, "Name is required"),
+        otpProofToken: z.string().uuid("Valid OTP proof is required"),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { contact, contactType, name } = input;
+      const { contact, contactType, name, otpProofToken } = input;
 
       try {
+        const hasOtpProof = consumeOtpProof(otpProofToken, contact, contactType);
+        if (!hasOtpProof) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "OTP verification required before registration",
+          });
+        }
+
         // Check if user already exists
         const existingUser = await getUserByContact(contact);
 
