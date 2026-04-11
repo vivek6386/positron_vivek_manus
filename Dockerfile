@@ -1,14 +1,15 @@
 # Use Node.js 22 as the base image
 FROM node:22-slim AS base
 
-# Install pnpm
-RUN npm install -g pnpm
+# Install pnpm (pinned to the project packageManager version)
+RUN npm install -g pnpm@10.4.1
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files needed for install
 COPY package.json pnpm-lock.yaml ./
+COPY patches ./patches
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
@@ -33,7 +34,8 @@ COPY --from=base /app/shared ./shared
 COPY --from=base /app/drizzle ./drizzle
 
 # Install only production dependencies
-RUN npm install -g pnpm && pnpm install --prod --frozen-lockfile
+COPY --from=base /app/patches ./patches
+RUN npm install -g pnpm@10.4.1 && pnpm install --prod --frozen-lockfile
 
 # Set environment variables
 ENV NODE_ENV=production
